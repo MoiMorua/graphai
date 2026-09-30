@@ -1,0 +1,75 @@
+# Configuración POR DEFECTO del grafo (va dentro del paquete).
+# Se fusiona, en este orden, con:
+#   1. ~/.config/grafo/models.yaml (o el archivo de --config)   -> tus ajustes globales
+#   2. <repo>/.grafo.yaml                                        -> ajustes del repo (p. ej. verify)
+# Los dicts se fusionan clave a clave; las listas se reemplazan completas.
+#
+# OJO: los slugs de Go y los precios son PROVISIONALES.
+# Verifícalos en la consola de OpenCode Go antes de usarlo en serio.
+
+backends:
+  local:
+    base_url: http://localhost:11434/v1      # llama-server: http://localhost:8080/v1
+    api_key: ollama
+    # Ollama ignora num_ctx en la API OpenAI-compatible: fíjalo con la variable
+    # OLLAMA_CONTEXT_LENGTH (o un Modelfile). Este valor es el guard del grafo:
+    # si la petición estimada no cabe, el router pasa al siguiente modelo.
+    num_ctx: 32768
+  go:
+    base_url: https://opencode.ai/zen/go/v1
+    api_key_env: OPENCODE_GO_API_KEY
+    headers:
+      User-Agent: grafo-agentico/0.1          # Go exige un user agent propio
+    session_header: x-opencode-session        # se envía el id del ticket
+    # Fracción del tope mensual consumible en cada ventana móvil
+    ventanas: {5h: 0.20, 7d: 0.50, 30d: 1.00}
+
+# precio: USD por millón de tokens. En Go no se paga por token, pero el consumo
+# se descuenta del tope mensual de cada modelo a precio de lista.
+modelos:
+  qwen-local:
+    backend: local
+    model: qwen3-coder:30b
+    roles: [clasificar, plan, codegen, review]
+    precio: {in: 0, out: 0}
+  glm-flash:
+    backend: go
+    model: glm-5.3-flash
+    roles: [plan, review]
+    precio: {in: 0.10, out: 0.40}
+    tope_mensual_usd: 60
+  kimi-k3:
+    backend: go
+    model: kimi-k3
+    roles: [plan, codegen, review]
+    precio: {in: 0.60, out: 2.50}
+    tope_mensual_usd: 15
+  deepseek-pro:
+    backend: go
+    model: deepseek-v4-pro
+    roles: [plan, codegen, review]
+    precio: {in: 0.50, out: 2.00}
+    tope_mensual_usd: 15
+
+# Orden dentro de cada tier = preferencia. Un modelo sin API key o fuera de tope
+# se salta; si el tier queda vacío se busca hacia arriba y luego hacia abajo.
+# intentos = fallos (verify/review) tolerados en ese tier antes de escalar.
+tiers:
+  1: {modelos: [glm-flash, qwen-local], intentos: 3}
+  2: {modelos: [kimi-k3, deepseek-pro], intentos: 3}
+
+# Tier mínimo por rol (p. ej. review: 2 para no revisar con el mismo nivel que genera)
+tier_min: {clasificar: 1, plan: 1, codegen: 1, review: 1}
+
+limites:
+  max_iteraciones_ticket: 25     # llamadas a codegen por ticket
+  max_consumo_ticket_usd: 3.00   # consumo de topes de Go (precio de lista) por ticket
+  max_replanificaciones: 2
+  max_reintentos_llamada: 3      # errores de red / respuesta vacía, con backoff
+  timeout_llamada_s: 300
+
+verify:
+  comandos:
+    - uv run --with pytest pytest -q   # usa el entorno del repo si tiene pyproject
+  codigos_ok: [0, 5]             # pytest devuelve 5 si no hay tests
+  timeout_s: 300

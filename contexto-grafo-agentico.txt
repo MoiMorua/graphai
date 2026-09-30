@@ -1,0 +1,147 @@
+CONTEXTO DEL PROYECTO: GRAFO DE DESARROLLO AGENTICO
+Fecha: 2026-09-30
+Idioma de trabajo: espanol
+
+=====================================================
+1. OBJETIVO
+=====================================================
+Construir un grafo de desarrollo agentico (nodos que se pasan estado) donde:
+- Los nodos de PLANIFICACION / REVISION / DECISION usan modelos alojados en la nube
+  a traves de OpenRouter, usando el Jev Router (typesafe/jev-router).
+- Los nodos de GENERACION DE CODIGO usan un modelo Qwen LOCAL.
+Prioridad: maximizar eficiencia de costo.
+
+=====================================================
+2. HARDWARE DEL USUARIO
+=====================================================
+- AMD Ryzen AI Max+ 395 (Strix Halo), GPU integrada Radeon 8060S (gfx1151)
+- 64 GB de memoria unificada (~256 GB/s de ancho de banda; el cuello de botella
+  es el ancho de banda, por eso conviene MoE con pocos parametros activos)
+
+=====================================================
+3. JEV ROUTER (OpenRouter)
+=====================================================
+Doc: https://openrouter.ai/docs/guides/routing/routers/jev-router
+
+- Modelo: "typesafe/jev-router". No requiere plugin para usarse.
+- Jev (modelo de decision de TypeSafe) lee la conversacion, juzga tipo de tarea
+  y dificultad, y elige el candidato mas barato que cumpla el nivel requerido
+  de un pool curado de modelos ALOJADOS en OpenRouter.
+- IMPORTANTE: NO puede enrutar hacia modelos locales. Solo sirve para los nodos
+  de planificacion. El nodo de codigo debe apuntar a otro base_url (local).
+- Funciona con Chat Completions, Responses y Messages (streaming y no streaming).
+- Contexto: 1M tokens. Entradas: audio, archivos, imagen, texto, video. Salida: texto.
+- La ficha de OpenRouter lista el router como gratuito; no queda claro si eso
+  incluye el costo del modelo elegido detras. Verificar costo real por llamada.
+
+Restringir el pool con el plugin "jev-router":
+  {
+    "model": "typesafe/jev-router",
+    "plugins": [{
+      "id": "jev-router",
+      "models": ["anthropic/*", "google/*"],
+      "excluded_models": ["anthropic/claude-opus*"]
+    }],
+    "messages": [...]
+  }
+- Campos: models (include), allowed_models (alias de models), excluded_models.
+- Cada lista acepta hasta 1024 patrones: slug exacto, revision con fecha,
+  wildcard (case-sensitive) o alias ~autor/familia-latest.
+- Las listas solo ACOTAN el pool, no agregan modelos.
+- Si "models" no coincide con nada, se ignora y se usa todo el pool
+  (excluded_models siempre aplica). Si excluded_models deja el pool vacio: 404.
+- Las listas pueden bajar el nivel (list_tier_cap) y quitar el "advisor" en
+  peticiones dificiles (max_fallback: "deep").
+- Claves desconocidas en el plugin devuelven 400.
+
+Observabilidad: enviar header "X-OpenRouter-Metadata: enabled" y leer
+openrouter_metadata.pipeline (entrada jev-router): resolved_models, models,
+excluded_models, list_fallback, list_tier_cap, max_fallback.
+
+Comportamiento a considerar: si la llamada a Jev expira o devuelve salida
+invalida, la peticion FALLA (no cae a otro router). Implementar reintentos en el grafo.
+Ademas el router mantiene un modelo estable durante la sesion (cache-aware).
+
+=====================================================
+4. MODELO LOCAL (GENERACION DE CODIGO)
+=====================================================
+Decision: no hace falta un fork; usar modelos oficiales de Qwen.
+
+Recomendado: Qwen3-Coder-30B-A3B (MoE, 3B activos)
+- Cuantizacion sugerida: UD-Q4_K_XL (~17.7 GB). Q4_K_S es ~5% mas rapida
+  a costa de algo de calidad.
+- Benchmarks en Strix Halo (llama.cpp Vulkan/RADV): ~97 t/s generacion con
+  UD-Q4_K_XL, ~101 t/s con Q4_K_S. (Medidos en equipos de 128 GB; mismo chip.)
+- Resultado REAL del usuario con Ollama (qwen-coder:30b):
+    prompt eval rate: 990.62 tokens/s (383 tokens, 249 en cache)
+    eval rate:        73.25 tokens/s (288 tokens en ~3.9 s)
+  -> Consistente con lo esperado (Ollama ~25% mas lento que llama-server directo).
+
+Alternativa de mayor calidad: Qwen3-Coder-Next (80B-A3B)
+- Q4_K_M ~45 GiB, ~43 t/s en Strix Halo. Cabe en 64 GB pero MUY justo
+  (sistema + memoria grafica asignada + contexto). Limitar contexto.
+- Reporte conocido: en flujos con muchas tool calls puede generar un preambulo
+  de tool call y detenerse sin emitir la llamada -> incluir reintentos.
+- Nota: Qwen3 Coder Next / Plus en el listado de Alibaba Cloud Int. en
+  OpenRouter figuran como "going away October 9, 2026" (otros proveedores
+  pueden seguir sirviendolos). Hosteado en OpenRouter: ~$0.12/M entrada,
+  $0.80/M salida.
+
+Modelos densos (ej. Qwen3.8 27B): mas lentos aqui (~24.5 t/s segun AMD con MTP)
+por el limite de ancho de banda. No recomendados para generacion en bucle.
+
+Como servirlo:
+- Hoy: Ollama en http://localhost:11434/v1 (API compatible con OpenAI).
+- Mejora opcional (+velocidad, mas control del paralelismo): llama-server de
+  llama.cpp con Vulkan/RADV, puerto 8080, p. ej. imagen
+  docker.io/kyuz0/amd-strix-halo-toolboxes:vulkan-radv
+- VIGILAR num_ctx en Ollama: fijarlo de forma deliberada (un grafo agentico
+  llena el contexto rapido y un truncado silencioso degrada las instrucciones).
+
+=====================================================
+5. ARQUITECTURA OBJETIVO
+=====================================================
+Dos backends con interfaz OpenAI-compatible:
+
+  PLANIFICADOR / REVISOR  ->  https://openrouter.ai/api/v1
+                              model: typesafe/jev-router
+                              (plugin jev-router para acotar pool; header de metadata)
+                              Auth: OPENROUTER_API_KEY
+
+  GENERADOR DE CODIGO     ->  http://localhost:11434/v1  (Ollama)
+                              o http://localhost:8080/v1 (llama-server)
+                              model: qwen3-coder:30b (o el nombre local que uses)
+                              Auth: dummy
+
+Flujo sugerido del grafo:
+  1) plan      (Jev Router)  -> descompone la tarea en pasos/archivos
+  2) codegen   (Qwen local)  -> genera/edita codigo por paso (puede paralelizarse)
+  3) verify    (tests/lint)  -> ejecuta comprobaciones reales
+  4) review    (Jev Router)  -> revisa resultado y decide: aceptar / replanificar
+  5) loop con limite de iteraciones y manejo de errores
+
+Requisitos de robustez:
+- Reintentos con backoff en nodos que llaman a Jev (falla si Jev falla).
+- Reintento si el modelo local emite tool call vacia/cortada.
+- Registrar model usado y costo por llamada (openrouter_metadata) para medir ahorro.
+- Limite de contexto explicito en el nodo local.
+
+=====================================================
+6. SIGUIENTE PASO PEDIDO
+=====================================================
+Generar el esqueleto del grafo (propuesta: LangGraph, Python) con:
+- cliente OpenRouter (typesafe/jev-router) para plan y review,
+- cliente local OpenAI-compatible para codegen,
+- estado tipado, nodo de verificacion, bucle con limite, logging de modelo/costo.
+Confirmar con el usuario framework preferido (LangGraph u otro) si hay duda.
+
+=====================================================
+7. FUENTES
+=====================================================
+- https://openrouter.ai/docs/guides/routing/routers/jev-router
+- https://openrouter.ai/typesafe/jev-router
+- https://openrouter.ai/qwen/qwen3-coder-next
+- https://github.com/visorcraft/strix-halo-llm-perf
+- https://github.com/hogeheer499-commits/strix-halo-guide
+- https://www.amd.com/en/blogs/2026/run-qwen-3-8-27b-on-amd-ryzen-ai-max-and-radeon-graphics-cards-day-0.html
+- https://github.com/ggml-org/llama.cpp/issues/19513
