@@ -47,7 +47,8 @@ def guardar_clave(clave: str, home: Path | None = None) -> Path:
     Raises:
         ValueError: Si la clave está vacía o solo tiene espacios.
     """
-    if not clave or not clave.strip():
+    clave = (clave or "").strip()  # al pegar suele colarse un espacio o salto de línea
+    if not clave:
         raise ValueError("La clave no puede estar vacía")
     ruta = _ruta_env(home)
     lineas = [l for l in _leer_lineas(ruta) if not _es_linea_variable(l)]

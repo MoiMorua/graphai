@@ -66,6 +66,11 @@ def test_leer_sin_archivo_devuelve_none(tmp_path):
     assert leer_clave(home=tmp_path) is None
 
 
+def test_guardar_quita_espacios_alrededor(tmp_path):
+    guardar_clave("  clave-pegada \n", home=tmp_path)
+    assert leer_clave(home=tmp_path) == "clave-pegada"
+
+
 def test_guardar_clave_vacia_lanza_value_error(tmp_path):
     with pytest.raises(ValueError):
         guardar_clave("", home=tmp_path)
