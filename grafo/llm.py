@@ -7,7 +7,9 @@ import time
 from dataclasses import dataclass
 from datetime import datetime
 
+import langsmith
 import openai
+from langsmith.wrappers import wrap_openai
 from openai import OpenAI
 
 from .config import Config
@@ -53,13 +55,15 @@ class Clientes:
     def _cliente(self, backend: str) -> OpenAI:
         if backend not in self._clientes:
             b = self.cfg.backends[backend]
-            self._clientes[backend] = OpenAI(
+            # wrap_openai traza cada llamada en LangSmith (prompt, salida, tokens, latencia)
+            # cuando LANGSMITH_TRACING=true; si no, no hace nada.
+            self._clientes[backend] = wrap_openai(OpenAI(
                 base_url=b["base_url"],
                 api_key=self.cfg.api_key(backend) or "sin-clave",
                 default_headers=b.get("headers") or None,
                 timeout=self.cfg.limites["timeout_llamada_s"],
                 max_retries=0,  # los reintentos los controlamos aquí
-            )
+            ), tracing_extra={"metadata": {"backend": backend}}, chat_name=f"llm-{backend}")
         return self._clientes[backend]
 
     def llamar(self, clave: str, mensajes: list[dict], *, ticket_id: str, nodo: str,
@@ -80,10 +84,13 @@ class Clientes:
         for intento in range(self.cfg.limites["max_reintentos_llamada"]):
             t0 = time.monotonic()
             try:
-                r = self._cliente(backend).chat.completions.create(
-                    model=m["model"], messages=mensajes, max_tokens=max_tokens,
-                    temperature=0.2, extra_headers=extra_headers,
-                )
+                with langsmith.tracing_context(
+                        tags=[nodo, clave],
+                        metadata={"ticket": ticket_id, "nodo": nodo, "modelo": clave, "intento": intento + 1}):
+                    r = self._cliente(backend).chat.completions.create(
+                        model=m["model"], messages=mensajes, max_tokens=max_tokens,
+                        temperature=0.2, extra_headers=extra_headers,
+                    )
             except openai.RateLimitError as e:
                 raise ModeloNoDisponible(f"tope alcanzado ({e.status_code})") from e
             except (openai.AuthenticationError, openai.PermissionDeniedError,

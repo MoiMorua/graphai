@@ -156,6 +156,31 @@ ticket terminan en *escalado a humano*. Un paso de dificultad 2 genera código c
 ventanas de 5 h (20 %), 7 días (50 %) y 30 días (100 %). Cada llamada queda en
 `~/.config/grafo/logs/uso.jsonl` y el router no elige un modelo que ya superó alguna ventana.
 
+## Observabilidad (LangSmith)
+
+Cada ticket puede trazarse en [LangSmith](https://smith.langchain.com): un run raíz
+`ticket <id>`, un run por nodo del grafo y, dentro, cada llamada al modelo con prompt, respuesta,
+tokens y latencia. Está apagado por defecto; para activarlo añade a `~/.config/grafo/.env`:
+
+```
+LANGSMITH_TRACING=true
+LANGSMITH_API_KEY=lsv2_...
+LANGSMITH_PROJECT=grafo
+# LANGSMITH_ENDPOINT=https://eu.api.smith.langchain.com   # si tu cuenta está en la región EU
+```
+
+`grafo status` muestra si está activo y en qué proyecto. Para filtrar en LangSmith:
+
+| Dónde | Qué |
+|---|---|
+| Run raíz | Nombre `ticket <id>`; tags `grafo`, `<repo>`; metadata `ticket`, `repo`, `rama`, `descripcion` |
+| Llamadas al modelo | Nombre `llm-local` / `llm-go`; tags `<nodo>`, `<modelo>`; metadata `nodo`, `modelo`, `backend`, `intento` |
+
+Las trazas incluyen los prompts, es decir **el código de tu repo**. Si no quieres enviarlo,
+`LANGSMITH_HIDE_INPUTS=true` y `LANGSMITH_HIDE_OUTPUTS=true` conservan la estructura y los
+tiempos sin el contenido. El consumo de topes de Go sigue registrándose en
+`~/.config/grafo/logs/uso.jsonl`, con o sin LangSmith.
+
 ## Configuración
 
 Se fusionan tres capas (dicts clave a clave; las listas se reemplazan completas):

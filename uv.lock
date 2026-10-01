@@ -188,6 +188,7 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "langgraph" },
+    { name = "langsmith" },
     { name = "openai" },
     { name = "pyyaml" },
 ]
@@ -200,6 +201,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "langgraph", specifier = ">=0.6" },
+    { name = "langsmith", specifier = ">=0.14.2" },
     { name = "openai", specifier = ">=1.40" },
     { name = "pyyaml", specifier = ">=6" },
 ]

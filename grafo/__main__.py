@@ -3,9 +3,12 @@ from __future__ import annotations
 import argparse
 import getpass
 import logging
+import os
 import sys
 import uuid
 from pathlib import Path
+
+from langsmith import utils as ls_utils
 
 from . import credenciales
 from .config import cargar_config, grafo_home
@@ -40,13 +43,22 @@ def ejecutar(args: argparse.Namespace, ap: argparse.ArgumentParser) -> int:
 
     estado = {"id": ticket_id, "descripcion": args.descripcion, "repo": str(trabajo),
               "comandos_verify": args.verify or [], "historial": []}
-    final = construir(cfg).invoke(estado, {"recursion_limit": 500})
+    # run_name/tags/metadata identifican el ticket en LangSmith (si el tracing está activo)
+    final = construir(cfg).invoke(estado, {
+        "recursion_limit": 500,
+        "run_name": f"ticket {ticket_id}",
+        "tags": ["grafo", repo.name],
+        "metadata": {"ticket": ticket_id, "repo": str(repo), "rama": rama,
+                     "descripcion": args.descripcion[:200]},
+    })
 
     hechos = sum(p["estado"] == "hecho" for p in final.get("pasos", []))
     print(f"\n== {ticket_id}: {final['estado_final']} ({final['motivo']})")
     print(f"   pasos {hechos}/{len(final.get('pasos', []))} · iteraciones {final['iteraciones_totales']}"
           f" · consumo Go ${final['consumo_usd']:.4f}")
     print(f"   reporte: {cfg.ruta_tickets / f'{ticket_id}.json'}")
+    if proyecto := proyecto_langsmith():
+        print(f"   traza:   LangSmith, proyecto '{proyecto}', run 'ticket {ticket_id}'")
 
     if rama:
         archivos = [(Path(final["repo"]) / a).relative_to(wt).as_posix()
@@ -83,14 +95,26 @@ def cmd_logout(args: argparse.Namespace, ap: argparse.ArgumentParser) -> int:
     return 0
 
 
+def proyecto_langsmith() -> str | None:
+    """Proyecto de LangSmith si el tracing está activo (LANGSMITH_TRACING=true), o None."""
+    if not ls_utils.tracing_is_enabled():
+        return None
+    return ls_utils.get_tracer_project()
+
+
 def cmd_status(args: argparse.Namespace, ap: argparse.ArgumentParser) -> int:
+    cfg = cargar_config(repo=Path.cwd())  # también carga ~/.config/grafo/.env
     print(f"home: {grafo_home()}")
     clave = credenciales.leer_clave()
     if clave:
         print(f"clave OpenCode Go: ****{clave[-4:]}")
     else:
         print("clave OpenCode Go: no guardada")
-    cfg = cargar_config(repo=Path.cwd())
+    if proyecto := proyecto_langsmith():
+        sin_clave = "" if os.environ.get("LANGSMITH_API_KEY") else " (¡falta LANGSMITH_API_KEY!)"
+        print(f"LangSmith: activo, proyecto '{proyecto}'{sin_clave}")
+    else:
+        print("LangSmith: inactivo (LANGSMITH_TRACING no es true)")
     print("config cargada:")
     for f in cfg.fuentes:
         print(f"  {f}")
