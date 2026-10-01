@@ -38,10 +38,21 @@ def crear_worktree(raiz: Path, ticket_id: str, base: Path) -> tuple[Path, str]:
 
 
 def confirmar(worktree: Path, archivos: list[str], mensaje: str) -> str | None:
-    """Commitea solo los archivos que escribió el agente. Devuelve el hash corto o None."""
+    """Commitea solo los archivos que escribió el agente. Devuelve el hash corto o None.
+
+    Filtra las rutas que no existen en disco ni están trackeadas por git
+    (p. ej. un archivo movido o borrado que git nunca conoció), para que
+    `git add` no falle con "pathspec did not match".
+    """
     if not archivos:
         return None
-    _git(worktree, "add", "--", *archivos)
+    candidatos = [
+        rel for rel in archivos
+        if (worktree / rel).exists() or _git(worktree, "ls-files", "--", rel)
+    ]
+    if not candidatos:
+        return None
+    _git(worktree, "add", "-A", "--", *candidatos)
     if not _git(worktree, "diff", "--cached", "--name-only"):
         return None
     _git(worktree, "commit", "-m", mensaje)
