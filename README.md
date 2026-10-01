@@ -28,16 +28,26 @@ Instalación (una vez), como comando global `grafo`:
 
 ```powershell
 uv tool install -e C:\Users\moi\projects\agent   # -e: los cambios al código aplican sin reinstalar
-copy .env.example $HOME\.config\grafo\.env       # pon ahí OPENCODE_GO_API_KEY
+grafo login                                      # pide la clave de OpenCode Go sin eco
 ```
 
 En cualquier repo:
 
 ```powershell
 cd C:\ruta\otro-repo
-grafo "descripción del ticket"             # rama agente/<id> en un worktree aparte + commit
-grafo "descripción del ticket" --en-sitio  # escribe directo en el directorio (sin git)
+grafo run "descripción del ticket"             # rama agente/<id> en un worktree aparte + commit
+grafo run "descripción del ticket" --en-sitio  # escribe directo en el directorio (sin git)
 ```
+
+| Comando | Qué hace |
+|---|---|
+| `grafo run TICKET` | Ejecuta un ticket (`--repo`, `--id`, `--verify CMD`, `--config`, `--en-sitio`) |
+| `grafo login [--key K]` | Guarda la clave de Go en `~/.config/grafo/.env` |
+| `grafo logout` | Borra la clave guardada |
+| `grafo status` | Home, clave (enmascarada) y capas de config que aplican en el directorio actual |
+| `grafo mermaid` | Diagrama del grafo |
+
+Una variable de entorno `OPENCODE_GO_API_KEY` ya definida tiene prioridad sobre la clave guardada.
 
 Por defecto el agente **no toca tu copia de trabajo**: crea la rama `agente/<id>` desde `HEAD`
 en `~/.config/grafo/worktrees/<repo>/<id>`, commitea solo los archivos que escribió y te
@@ -69,7 +79,7 @@ limites:
 
 `GRAFO_HOME` cambia la ubicación de `~/.config/grafo`.
 
-Desarrollo del grafo: `uv sync`, `uv run grafo --mermaid`, `uv add <paquete>`.
+Desarrollo del grafo: `uv sync`, `uv run pytest -q`, `uv add <paquete>`.
 
 ## Piezas
 
@@ -78,6 +88,8 @@ Desarrollo del grafo: `uv sync`, `uv run grafo --mermaid`, `uv add <paquete>`.
 | `grafo/models.yaml` | Config por defecto: backends, modelos (roles, precio, tope Go), tiers, límites, verify |
 | `grafo/config.py` | Carga por capas y rutas globales |
 | `grafo/git.py` | Rama + worktree por ticket y commit de los archivos escritos |
+| `grafo/credenciales.py` | Guardar / leer / borrar la clave de Go en el `.env` global |
+| `grafo/__main__.py` | CLI con subcomandos |
 | `grafo/router.py` | Clasificador + selección: tier pedido → primer modelo disponible (clave, rol, tope Go); si no hay, sube y luego baja |
 | `grafo/llm.py` | Cliente OpenAI-compatible por backend: reintentos con backoff, guard de `num_ctx`, consumo de topes de Go |
 | `grafo/presupuesto.py` | Registro de consumo y ventanas de Go (5h 20 %, 7d 50 %, 30d 100 %) |
@@ -86,7 +98,6 @@ Desarrollo del grafo: `uv sync`, `uv run grafo --mermaid`, `uv add <paquete>`.
 
 ## Pendientes
 
-- Instalar git (`winget install Git.Git`) y probar el modo rama/worktree: aún no se ha ejecutado.
 - Verificar slugs y precios de Go en `models.yaml` (están marcados como provisionales).
 - Fijar `OLLAMA_CONTEXT_LENGTH` (p. ej. 32768) y reiniciar Ollama: la API `/v1` ignora `num_ctx`.
 - Codegen reescribe archivos completos; para archivos grandes convendrá pasar a diffs/edits.
