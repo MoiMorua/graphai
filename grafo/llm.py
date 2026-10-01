@@ -11,7 +11,7 @@ import openai
 from openai import OpenAI
 
 from .config import Config
-from .presupuesto import Libro
+from .budget import Libro
 
 log = logging.getLogger("grafo.llm")
 
@@ -123,3 +123,4 @@ class Clientes:
         log.info("%-8s %-13s in=%-6d out=%-6d consumo=$%.4f %.1fs",
                  nodo, clave, tin, tout, consumo, segundos)
         return Respuesta(texto, clave, tin, tout, consumo)
+

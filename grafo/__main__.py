@@ -8,10 +8,10 @@ import sys
 import uuid
 from pathlib import Path
 
-from . import actualizar, credenciales
+from . import credentials as credenciales, upgrade as actualizar
 from .config import cargar_config, grafo_home
 from .git import GitError, confirmar, crear_worktree, raiz_git
-from .grafo import construir
+from .graph import construir
 from .local import comprobar_local
 
 log = logging.getLogger("grafo")
@@ -206,3 +206,4 @@ def main() -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
+

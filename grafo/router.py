@@ -4,7 +4,7 @@ import logging
 
 from .config import Config
 from .llm import Clientes, LLMError, ModeloNoDisponible, Respuesta, extraer_json
-from .presupuesto import Libro
+from .budget import Libro
 
 log = logging.getLogger("grafo.router")
 
@@ -82,3 +82,4 @@ class Router:
         except (LLMError, SinModelos, ValueError, TypeError) as e:
             log.warning("clasificación falló (%s); uso heurística", e)
             return {"tipo": "otro", "dificultad": 1 if len(descripcion) < 300 else 2}, None
+
