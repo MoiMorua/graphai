@@ -31,24 +31,24 @@ modelos:
   qwen-local:
     backend: local
     model: qwen3-coder:30b
-    roles: [clasificar, plan, codegen, review]
+    roles: [clasificar, plan, codegen, review, diagnostico]
     precio: {in: 0, out: 0}
   glm-flash:
     backend: go
     model: glm-5.3-flash
-    roles: [plan, review]
+    roles: [plan, review, diagnostico]
     precio: {in: 0.10, out: 0.40}
     tope_mensual_usd: 60
   kimi-k3:
     backend: go
     model: kimi-k3
-    roles: [plan, codegen, review]
+    roles: [plan, codegen, review, diagnostico]
     precio: {in: 0.60, out: 2.50}
     tope_mensual_usd: 15
   deepseek-pro:
     backend: go
     model: deepseek-v4-pro
-    roles: [plan, codegen, review]
+    roles: [plan, codegen, review, diagnostico]
     precio: {in: 0.50, out: 2.00}
     tope_mensual_usd: 15
 
@@ -60,7 +60,7 @@ tiers:
   2: {modelos: [kimi-k3, deepseek-pro], intentos: 3}
 
 # Tier mínimo por rol (p. ej. review: 2 para no revisar con el mismo nivel que genera)
-tier_min: {clasificar: 1, plan: 1, codegen: 1, review: 1}
+tier_min: {clasificar: 1, plan: 1, codegen: 1, review: 1, diagnostico: 1}
 
 limites:
   max_iteraciones_ticket: 25     # llamadas a codegen por ticket

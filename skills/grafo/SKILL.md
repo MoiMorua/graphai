@@ -117,14 +117,22 @@ Open `<repo>/.grafo/tickets/<id>.json`:
 
 - `motivo` — why it stopped (`tiers agotados`, iteration limit, Go consumption limit, plan/review error).
 - `pasos[i].feedback` — the last verify output or reviewer comments per step; usually shows
-  the real problem (missing dependency, wrong test command, ambiguous ticket).
+  the real problem (missing dependency, wrong test command, ambiguous ticket). Lines starting
+  with `PISTA:` mean grafo recognized an environment error (import, missing command, timeout),
+  not a logic bug; `AVISO:` means the model repeated the same files and the same error;
+  `DIAGNÓSTICO:` is a stronger model's root-cause analysis after the same verify error twice
+  in a row (also in `historial`, node `diagnostico`). If the step still failed after it, the
+  diagnosis is usually the best starting point for fixing the ticket or the repo.
 - `pasos[i].tier_actual`, `historial` — which models were tried and what each node decided.
+  A step that escalates before using up its attempts was stuck repeating itself (`repeticiones`).
 
 Common causes and fixes:
 
 | Symptom | Fix |
 |---|---|
 | verify fails on every attempt with the same error | Wrong/unavailable `--verify` command, or missing dependency in the repo |
+| `PISTA: Error de importación` persists across tiers | The repo's own code isn't importable by the test runner (no `pyproject.toml`/`conftest.py`, `go.mod`, `mod` declarations…); name the support file in the ticket or add it first |
+| `PISTA: Un comando … no existe` | The `--verify` tool isn't installed or on PATH; no model can fix it, fix the environment |
 | "No se encontró ningún bloque '### ARCHIVO: ruta'" | Model ignored the output format; re-run, or simplify the step |
 | reviewer keeps asking for changes | Ticket is ambiguous; restate the acceptance criteria explicitly |
 | `no es un repo git (o git no está instalado)` | Run inside a git repo, put git on PATH, or use `--en-sitio` |

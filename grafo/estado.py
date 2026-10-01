@@ -12,6 +12,11 @@ class Paso(TypedDict):
     tier_actual: int
     intentos_en_tier: int
     feedback: list[str]        # errores de verify / review para el siguiente intento
+    huella: str | None         # hash de lo escrito en el último codegen
+    huella_anterior: str | None
+    repeticiones: int          # intentos seguidos con la misma salida y el mismo error
+    ultimo_error: str | None   # último fallo normalizado, para detectar errores repetidos
+    diagnosticados: list[str]  # hashes de los errores ya enviados a diagnóstico
     estado: Literal["pendiente", "en_curso", "hecho"]
 
 
@@ -34,6 +39,7 @@ class Ticket(TypedDict, total=False):
     archivos_escritos: list[str]
     archivos_modificados: Annotated[list[str], operator.add]   # todo el ticket (para el commit)
     fallo: str | None           # motivo del último fallo (codegen, verify o review)
+    diagnosticar: bool          # el fallo pide pasar por el nodo de diagnóstico
     verify_ok: bool
     decision_review: Literal["aceptar", "cambios", "replanificar"]
 

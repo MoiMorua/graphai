@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 import logging
 import os
+import re
 import subprocess
 from collections.abc import Callable
 from pathlib import Path
@@ -19,7 +21,9 @@ log = logging.getLogger("grafo.nodos")
 IGNORAR = {".git", ".grafo", ".venv", "venv", "node_modules", "__pycache__", ".pytest_cache", "logs",
            "dist", "build"}
 MAX_CHARS_ARCHIVO = 12_000
+MAX_CHARS_VERIFY = 4_000       # por comando; se conserva el principio (primer error) y el final (resumen)
 DECISIONES = ("aceptar", "cambios", "replanificar")
+PREFIJO_VERIFY = "Fallaron las verificaciones:"
 
 PROMPT_PLAN = """Eres el planificador de un agente de desarrollo. Descompón el ticket en el
 MÍNIMO de pasos necesario: una tarea pequeña es UN solo paso. Cada paso es una unidad
@@ -41,7 +45,43 @@ bloque ARCHIVO con la ruta nueva solo si también cambia su contenido:
 ### MOVER: ruta/vieja -> ruta/nueva
 Para eliminar un archivo usa una línea:
 ### BORRAR: ruta/relativa
-Actualiza también los archivos que referencian a los renombrados (imports, configuración)."""
+Actualiza también los archivos que referencian a los renombrados (imports, configuración).
+Puedes crear o modificar archivos de soporte que no estén en el plan (configuración del
+proyecto, archivos de inicialización de paquetes, configuración de tests) si hacen falta
+para que el código compile y los tests se ejecuten. Usa ARCHIVOS DEL REPO para ver qué existe."""
+
+# Patrones de error de entorno (no de lógica) que los modelos pequeños suelen no reconocer.
+PISTAS = [
+    (re.compile(r"ModuleNotFoundError|ImportError"),
+     ("Error de importación (Python): no es un fallo de la lógica. Si el módulo no encontrado es "
+      "del propio repo, crea un conftest.py en la raíz (puede estar vacío): pytest añade así la "
+      "raíz a sys.path. Si es una dependencia externa, declárala en la configuración del proyecto.")),
+    (re.compile(r"Cannot find module|ERR_MODULE_NOT_FOUND"),
+     ("Error de importación (JS/TS): revisa la ruta relativa del import (con ESM hay que incluir "
+      "la extensión, p. ej. './x.js') y que la dependencia esté en package.json.")),
+    (re.compile(r"unresolved import|E0432|E0433|can't find crate"),
+     ("Error de importación (Rust): declara el módulo con `mod nombre;` en lib.rs/main.rs y las "
+      "dependencias externas en Cargo.toml.")),
+    (re.compile(r"no required module provides package|cannot find package|package \S+ is not in std"),
+     ("Error de importación (Go): la ruta del import debe empezar por el nombre del módulo de "
+      "go.mod; las dependencias externas deben estar en go.mod.")),
+    (re.compile(r"command not found|is not recognized as an internal or external command"
+                r"|no se reconoce como un comando"),
+     ("Un comando o ejecutable de la verificación no existe en el entorno. No es un fallo de la "
+      "lógica: revisa la configuración del proyecto (scripts, dependencias de desarrollo).")),
+    (re.compile(r"^timeout$", re.M),
+     ("La verificación excedió el tiempo límite: posible bucle infinito, espera de entrada "
+      "o un servidor que no termina.")),
+]
+
+AVISO_REPETICION = (
+    "AVISO: tu intento anterior produjo exactamente los mismos archivos y la verificación falló "
+    "con el mismo error. Repetir el mismo código no sirve: el problema probablemente no está en "
+    "la lógica sino en imports, rutas, nombres o archivos de soporte/configuración que faltan "
+    "(puedes crearlos). Lee el error con atención y cambia de enfoque.")
+
+# Partes variables de la salida (duraciones, direcciones) que no cambian el significado del error.
+RE_RUIDO = re.compile(r"\b\d+(?:\.\d+)?\s*(?:ms|s|seconds?)\b|0x[0-9a-fA-F]+")
 
 PROMPT_REVIEW = """Eres revisor de código. Las verificaciones automáticas ya pasaron.
 Evalúa SOLO el PASO ACTUAL: lo que corresponde a pasos pendientes del plan se hará después
@@ -50,6 +90,14 @@ Responde SOLO con JSON:
 {"decision": "aceptar"|"cambios"|"replanificar", "feedback": str}
 Usa "cambios" para problemas concretos del código (explica cuáles).
 Usa "replanificar" solo si el plan en sí es incorrecto o incompleto para el ticket."""
+
+PROMPT_DIAGNOSTICO = """Eres un experto en diagnosticar fallos de compilación y de tests en cualquier
+lenguaje. Un generador de código ha fallado dos veces seguidas con el mismo error. No escribas el
+código: identifica la causa raíz y di qué hay que cambiar. Distingue un fallo de la lógica de uno
+de entorno o estructura (imports, rutas, nombres de módulo o paquete, configuración del proyecto,
+archivos de soporte que faltan). Responde SOLO con JSON:
+{"causa": str, "accion": str}
+"accion": instrucciones concretas y breves (qué archivo crear o modificar y cómo), máximo 5 líneas."""
 
 
 class JSONInvalido(ValueError):
@@ -83,6 +131,35 @@ def mostrar_archivos(repo: Path, rutas: list[str]) -> str:
         bloques.append(f"### ARCHIVO: {r}\n(no existe)" if contenido is None
                        else f"### ARCHIVO: {r}\n```\n{contenido}\n```")
     return "\n\n".join(bloques) or "(ninguno)"
+
+
+def pistas(salida: str) -> list[str]:
+    return [texto for patron, texto in PISTAS if patron.search(salida)]
+
+
+def huella(repo: Path, rutas: list[str]) -> str:
+    """Hash del estado de los archivos tocados (un borrado cuenta como contenido vacío distinto)."""
+    h = hashlib.sha1()
+    for r in sorted(set(rutas)):
+        try:
+            contenido = ruta_segura(repo, r).read_bytes()
+        except (OSError, ValueError):
+            contenido = b"<borrado>"
+        h.update(r.encode() + b"\0" + contenido + b"\0")
+    return h.hexdigest()
+
+
+def normalizar_error(texto: str) -> str:
+    return RE_RUIDO.sub("", texto)
+
+
+def recortar(salida: str, limite: int = MAX_CHARS_VERIFY) -> str:
+    """Recorta conservando el principio (suele estar el primer error) y el final (el resumen)."""
+    if len(salida) <= limite:
+        return salida
+    cabeza, cola = limite * 2 // 5, limite * 3 // 5
+    omitidos = len(salida) - cabeza - cola
+    return f"{salida[:cabeza]}\n[… {omitidos} caracteres omitidos …]\n{salida[-cola:]}"
 
 
 class Nodos:
@@ -176,7 +253,8 @@ class Nodos:
             pasos.append(Paso(id=i, descripcion=str(p["descripcion"]),
                               archivos=[str(a) for a in p.get("archivos") or []],
                               tier_inicial=tier, tier_actual=tier, intentos_en_tier=0,
-                              feedback=[], estado="pendiente"))
+                              feedback=[], huella=None, huella_anterior=None, repeticiones=0,
+                              ultimo_error=None, diagnosticados=[], estado="pendiente"))
         for p in pasos:
             log.info("  paso %d [tier %d] %s", p["id"] + 1, p["tier_inicial"], p["descripcion"])
         return {"pasos": pasos, "paso_idx": 0, "archivos_escritos": [], "error": None,
@@ -187,9 +265,11 @@ class Nodos:
         pasos = copy.deepcopy(state["pasos"])
         paso = pasos[state["paso_idx"]]
         paso["estado"] = "en_curso"
+        paso["huella_anterior"], paso["huella"] = paso.get("huella"), None
 
         usuario = (f"TICKET:\n{state['descripcion']}\n\nPLAN:\n{self._plan_txt(pasos, paso['id'])}\n\n"
                    f"PASO ACTUAL ({paso['id'] + 1}): {paso['descripcion']}\n\n"
+                   f"ARCHIVOS DEL REPO:\n{arbol_repo(repo)}\n\n"
                    f"ARCHIVOS ACTUALES:\n{mostrar_archivos(repo, paso['archivos'] + state.get('archivos_escritos', []))}")
         if paso["feedback"]:
             usuario += "\n\nERRORES DEL INTENTO ANTERIOR (corrígelos):\n" + "\n\n".join(paso["feedback"][-2:])
@@ -215,6 +295,7 @@ class Nodos:
             return {**base, "fallo": "No se encontró ningún bloque '### ARCHIVO: ruta' seguido de "
                                      "un bloque de código. Respeta el formato exacto.",
                     **self._cuenta(state, [r], "codegen", archivos=0)}
+        paso["huella"] = huella(repo, escritos)
         log.info("  paso %d: escritos %s", paso["id"] + 1, escritos)
         return {**base, "fallo": None, "archivos_modificados": escritos,
                 "archivos_escritos": list(dict.fromkeys(state.get("archivos_escritos", []) + escritos)),
@@ -233,31 +314,86 @@ class Nodos:
             except subprocess.TimeoutExpired:
                 codigo, salida = -1, "timeout"
             if codigo not in codigos_ok:
-                errores.append(f"$ {cmd}  (exit {codigo})\n{salida[-3000:]}")
+                notas = "".join(f"PISTA: {p}\n" for p in pistas(salida))
+                errores.append(f"$ {cmd}  (exit {codigo})\n{notas}{recortar(salida)}")
         ok = not errores
         log.info("  verify: %s", "OK" if ok else f"{len(errores)} comando(s) fallaron")
         return {"verify_ok": ok,
-                "fallo": None if ok else "Fallaron las verificaciones:\n" + "\n\n".join(errores),
+                "fallo": None if ok else f"{PREFIJO_VERIFY}\n" + "\n\n".join(errores),
                 "historial": [{"nodo": "verify", "ok": ok}]}
 
     def fallo(self, state: Ticket) -> dict:
-        """Escalado iterativo por paso: N intentos por tier y luego +1 tier."""
+        """Escalado iterativo por paso: N intentos por tier y luego +1 tier.
+
+        Si el modelo repite la misma salida con el mismo error, se le avisa una vez;
+        a la segunda repetición seguida se escala sin agotar los intentos del tier.
+        Si verify falla dos veces seguidas con el mismo error (aunque cambie el código),
+        se pide un diagnóstico, una sola vez por error distinto.
+        """
         pasos = copy.deepcopy(state["pasos"])
         paso = pasos[state["paso_idx"]]
-        paso["feedback"].append(state.get("fallo") or "fallo sin detalle")
+        motivo = state.get("fallo") or "fallo sin detalle"
+        error = normalizar_error(motivo)
+        mismo_error = error == paso.get("ultimo_error")
+        paso["ultimo_error"] = error
+        misma_salida = paso.get("huella") is not None and paso["huella"] == paso.get("huella_anterior")
+        repetido = misma_salida and mismo_error
+        paso["repeticiones"] = paso.get("repeticiones", 0) + 1 if repetido else 0
+        if paso["repeticiones"] == 1:
+            log.info("  paso %d: misma salida y mismo error que el intento anterior", paso["id"] + 1)
+            motivo = f"{AVISO_REPETICION}\n\n{motivo}"
+        paso["feedback"].append(motivo)
         paso["intentos_en_tier"] += 1
         escalado = False
-        if paso["intentos_en_tier"] >= self.cfg.tiers[paso["tier_actual"]]["intentos"]:
+        if (paso["intentos_en_tier"] >= self.cfg.tiers[paso["tier_actual"]]["intentos"]
+                or paso["repeticiones"] >= 2):
+            paso["repeticiones"] = 0
             paso["tier_actual"] += 1
             paso["intentos_en_tier"] = 0
             escalado = True
             if paso["tier_actual"] <= self.cfg.max_tier:
                 log.info("  paso %d: escalado a tier %d", paso["id"] + 1, paso["tier_actual"])
-        upd = {"pasos": pasos, "historial": [{"nodo": "fallo", "paso": paso["id"],
-                                              "tier": paso["tier_actual"], "escalado": escalado}]}
+        upd = {"pasos": pasos, "diagnosticar": False,
+               "historial": [{"nodo": "fallo", "paso": paso["id"],
+                              "tier": paso["tier_actual"], "escalado": escalado}]}
         if paso["tier_actual"] > self.cfg.max_tier:
             upd["error"] = f"el paso {paso['id'] + 1} agotó todos los tiers"
+            return upd
+        clave = hashlib.sha1(error.encode()).hexdigest()[:12]
+        diagnosticados = paso.setdefault("diagnosticados", [])
+        if motivo.startswith(PREFIJO_VERIFY) and mismo_error and clave not in diagnosticados:
+            diagnosticados.append(clave)
+            upd["diagnosticar"] = True
         return upd
+
+    def diagnostico(self, state: Ticket) -> dict:
+        """Pide a un modelo la causa raíz de un error de verify repetido y la antepone al feedback.
+
+        Es una ayuda: si no hay modelo o la respuesta no es válida, el ticket sigue igual.
+        """
+        repo = Path(state["repo"])
+        pasos = copy.deepcopy(state["pasos"])
+        paso = pasos[state["paso_idx"]]
+        usuario = (f"TICKET:\n{state['descripcion']}\n\nPASO ACTUAL: {paso['descripcion']}\n\n"
+                   f"ARCHIVOS DEL REPO:\n{arbol_repo(repo)}\n\n"
+                   f"ARCHIVOS ACTUALES:\n{mostrar_archivos(repo, paso['archivos'] + state.get('archivos_escritos', []))}\n\n"
+                   f"ERROR (repetido):\n{state.get('fallo')}")
+        try:
+            d, rs = self._llm_json(state, "diagnostico", paso["tier_actual"], PROMPT_DIAGNOSTICO, usuario,
+                                   4000, "diagnostico",   # los modelos con razonamiento lo consumen antes de responder
+                                   lambda d: bool(d.get("causa")) and bool(d.get("accion")))
+        except JSONInvalido as e:
+            log.warning("  diagnóstico sin respuesta válida; se continúa sin él")
+            return {"diagnosticar": False, **self._cuenta(state, e.respuestas, "diagnostico", ok=False)}
+        except (LLMError, SinModelos) as e:
+            log.warning("  diagnóstico no disponible (%s); se continúa sin él", e)
+            return {"diagnosticar": False, "historial": [{"nodo": "diagnostico", "error": str(e)}]}
+
+        causa, accion = str(d["causa"]).strip(), str(d["accion"]).strip()
+        log.info("  diagnóstico paso %d: %s", paso["id"] + 1, causa[:120])
+        paso["feedback"][-1] = f"DIAGNÓSTICO (causa raíz): {causa}\nQUÉ HACER: {accion}\n\n{paso['feedback'][-1]}"
+        return {"pasos": pasos, "diagnosticar": False,
+                **self._cuenta(state, rs, "diagnostico", causa=causa, accion=accion)}
 
     def review(self, state: Ticket) -> dict:
         repo = Path(state["repo"])
@@ -267,7 +403,8 @@ class Nodos:
                    f"ARCHIVOS RESULTANTES:\n{mostrar_archivos(repo, state.get('archivos_escritos', []))}")
         try:
             d, rs = self._llm_json(state, "review", paso["tier_actual"], PROMPT_REVIEW, usuario,
-                                   2000, "review", lambda d: d.get("decision") in DECISIONES)
+                                   4000, "review",   # margen para el razonamiento de glm-flash
+                                   lambda d: d.get("decision") in DECISIONES)
         except JSONInvalido as e:
             return {"error": str(e), **self._cuenta(state, e.respuestas, "review")}
         except (LLMError, SinModelos) as e:

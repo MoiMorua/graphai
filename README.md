@@ -149,6 +149,8 @@ flowchart TD
     verify -->|OK| review
     verify -->|falla| fallo[fallo<br/>+1 intento; al agotar los del tier → tier+1]
     fallo --> codegen
+    fallo -->|mismo error de verify<br/>dos veces seguidas| diagnostico[diagnostico<br/>causa raíz y qué hacer]
+    diagnostico --> codegen
     review -->|aceptar| avanzar
     review -->|cambios| fallo
     review -->|replanificar| replanificar[replanificar<br/>tier del plan +1]
@@ -158,20 +160,34 @@ flowchart TD
     plan & codegen & verify & fallo & review & replanificar -.->|error, tiers agotados,<br/>iteraciones o consumo| humano([escalado a humano])
 ```
 
-**Router.** Cada llamada pide un *rol* (`clasificar`, `plan`, `codegen`, `review`) y un *tier*.
+**Router.** Cada llamada pide un *rol* (`clasificar`, `plan`, `codegen`, `review`, `diagnostico`) y un *tier*.
 El router toma el primer modelo del tier que tenga ese rol, tenga clave y no haya superado su
 tope de Go; si ninguno sirve, prueba tiers superiores y luego inferiores. Si un modelo falla
 (tope, error 4xx, respuesta vacía tras reintentos, contexto insuficiente) pasa al siguiente.
 
 | Tier | Modelos (en orden de preferencia) | Intentos antes de escalar |
 |---|---|---|
-| 1 | `glm-flash` (Go) para plan/review · `qwen-local` para clasificar/codegen | 3 |
+| 1 | `glm-flash` (Go) para plan/review/diagnostico · `qwen-local` para clasificar/codegen | 3 |
 | 2 | `kimi-k3`, `deepseek-pro` (Go) | 3 |
 
 **Escalado.** El tier es por paso: arranca en la dificultad que asignó el plan, y cada fallo de
 verify o petición de cambios del revisor cuenta un intento; al agotarlos sube un tier. Un paso
 que pasa del último tier, más de 2 replanificaciones, 25 iteraciones o $3 de consumo de Go por
 ticket terminan en *escalado a humano*. Un paso de dificultad 2 genera código con Go, no en local.
+
+**Ayudas al modelo.** Codegen recibe el árbol del repo, no solo los archivos del paso, y puede
+crear archivos de soporte (configuración, `conftest.py`, `__init__.py`…). Si la salida de verify
+coincide con un error de entorno conocido (import de Python, JS/TS, Rust o Go; comando
+inexistente; timeout), el feedback lleva antes una línea `PISTA:` con la causa probable. Si el
+modelo repite los mismos archivos con el mismo error, se le avisa una vez (`AVISO:`) y, si
+vuelve a repetirlos, el paso sube de tier sin agotar sus intentos.
+
+**Diagnóstico.** Si verify falla dos veces seguidas con el mismo error (aunque el código haya
+cambiado), un modelo del rol `diagnostico` recibe el error, el árbol del repo y los archivos, y
+responde la causa raíz y qué cambiar; eso va al principio del feedback del siguiente intento
+(`DIAGNÓSTICO:`). Se hace una vez por error distinto, y si no hay modelo disponible el ticket
+sigue sin él. La salida de cada comando de verify se recorta a 4000 caracteres conservando el
+principio (donde suele estar el primer error) y el final (el resumen).
 
 **Topes de Go.** Go descuenta el uso del tope mensual de cada modelo a precio de lista, con
 ventanas de 5 h (20 %), 7 días (50 %) y 30 días (100 %). Cada llamada queda en
