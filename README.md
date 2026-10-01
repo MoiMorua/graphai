@@ -173,6 +173,13 @@ verify o petición de cambios del revisor cuenta un intento; al agotarlos sube u
 que pasa del último tier, más de 2 replanificaciones, 25 iteraciones o $3 de consumo de Go por
 ticket terminan en *escalado a humano*. Un paso de dificultad 2 genera código con Go, no en local.
 
+**Ayudas al modelo.** Codegen recibe el árbol del repo, no solo los archivos del paso, y puede
+crear archivos de soporte (configuración, `conftest.py`, `__init__.py`…). Si la salida de verify
+coincide con un error de entorno conocido (import de Python, JS/TS, Rust o Go; comando
+inexistente; timeout), el feedback lleva antes una línea `PISTA:` con la causa probable. Si el
+modelo repite los mismos archivos con el mismo error, se le avisa una vez (`AVISO:`) y, si
+vuelve a repetirlos, el paso sube de tier sin agotar sus intentos.
+
 **Topes de Go.** Go descuenta el uso del tope mensual de cada modelo a precio de lista, con
 ventanas de 5 h (20 %), 7 días (50 %) y 30 días (100 %). Cada llamada queda en
 `~/.config/grafo/logs/uso.jsonl` y el router no elige un modelo que ya superó alguna ventana.

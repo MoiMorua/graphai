@@ -12,6 +12,9 @@ class Paso(TypedDict):
     tier_actual: int
     intentos_en_tier: int
     feedback: list[str]        # errores de verify / review para el siguiente intento
+    huella: str | None         # hash de lo escrito en el último codegen
+    huella_anterior: str | None
+    repeticiones: int          # intentos seguidos con la misma salida y el mismo error
     estado: Literal["pendiente", "en_curso", "hecho"]
 
 
