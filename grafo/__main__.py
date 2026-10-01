@@ -8,7 +8,8 @@ import sys
 import uuid
 from pathlib import Path
 
-from . import credentials as credenciales, upgrade as actualizar
+from . import credentials as credenciales
+from . import upgrade as actualizar
 from .config import cargar_config, grafo_home
 from .git import GitError, confirmar, crear_worktree, raiz_git
 from .graph import construir
@@ -206,4 +207,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
-

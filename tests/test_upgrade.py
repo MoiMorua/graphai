@@ -4,7 +4,7 @@ import urllib.error
 
 import pytest
 
-from grafo import actualizar
+from grafo import upgrade as actualizar
 
 
 class DistFalsa:

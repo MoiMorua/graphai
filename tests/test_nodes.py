@@ -3,7 +3,7 @@ from pathlib import Path
 
 from grafo.config import Config
 from grafo.llm import Respuesta
-from grafo.nodos import (
+from grafo.nodes import (
     AVISO_REPETICION,
     Nodos,
     huella,

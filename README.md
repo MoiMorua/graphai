@@ -233,16 +233,16 @@ uv run grafo --help
 | Archivo | Qué hace |
 |---|---|
 | `grafo/__main__.py` | CLI y subcomandos |
-| `grafo/grafo.py` | Nodos y aristas condicionales |
-| `grafo/nodos.py` | Implementación de los nodos y prompts |
+| `grafo/graph.py` | Nodos y aristas condicionales |
+| `grafo/nodes.py` | Implementación de los nodos y prompts |
 | `grafo/router.py` | Clasificador y selección de modelo por rol/tier |
 | `grafo/local.py` | Detección del modelo local y arranque de `ollama serve` |
 | `grafo/llm.py` | Cliente OpenAI-compatible: reintentos con backoff, guard de contexto, registro de consumo |
-| `grafo/presupuesto.py` | Registro de uso y comprobación de las ventanas de Go |
+| `grafo/budget.py` | Registro de uso y comprobación de las ventanas de Go |
 | `grafo/config.py` | Carga de configuración por capas |
 | `grafo/git.py` | Rama + worktree por ticket y commit |
-| `grafo/credenciales.py` | Guardar, leer y borrar la clave de Go |
-| `grafo/actualizar.py` | Versión instalada, consulta de releases y `upgrade` |
+| `grafo/credentials.py` | Guardar, leer y borrar la clave de Go |
+| `grafo/upgrade.py` | Versión instalada, consulta de releases y `upgrade` |
 
 El CLI con subcomandos lo implementó el propio agente (`grafo run` sobre este repo).
 
