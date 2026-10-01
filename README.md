@@ -58,6 +58,13 @@ Al terminar imprime el resultado y los comandos para continuar:
 - `--en-sitio` escribe directamente en el directorio, sin rama ni commit (útil sin git).
 - Una variable de entorno `OPENCODE_GO_API_KEY` tiene prioridad sobre la clave guardada.
 
+### Skill para agentes
+
+`skills/grafo/SKILL.md` (en inglés, formato Agent Skills) enseña a un agente a usar el CLI:
+comprobar requisitos, redactar el ticket, ejecutarlo, revisar la rama y diagnosticar escalados.
+Copia la carpeta `skills/grafo/` al directorio de skills de tu harness, por ejemplo
+`~/.claude/skills/` (Claude Code) o `.cursor/skills/` (Cursor).
+
 ## Cómo funciona
 
 ```mermaid
