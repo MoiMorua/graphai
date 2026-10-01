@@ -1,6 +1,6 @@
 [project]
 name = "grafo-agentico"
-version = "0.2.0"
+version = "0.3.0"
 description = "Grafo agéntico de desarrollo: router propio + Qwen local + OpenCode Go"
 requires-python = ">=3.12"
 dependencies = [

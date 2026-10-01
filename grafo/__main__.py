@@ -12,6 +12,7 @@ from . import actualizar, credenciales
 from .config import cargar_config, grafo_home
 from .git import GitError, confirmar, crear_worktree, raiz_git
 from .grafo import construir
+from .local import comprobar_local
 
 log = logging.getLogger("grafo")
 
@@ -38,6 +39,9 @@ def ejecutar(args: argparse.Namespace, ap: argparse.ArgumentParser) -> int:
         log.info("trabajando en la rama %s (worktree %s)", rama, wt)
     else:
         repo.mkdir(parents=True, exist_ok=True)
+
+    for aviso in comprobar_local(cfg):
+        log.warning(aviso)
 
     estado = {"id": ticket_id, "descripcion": args.descripcion, "repo": str(trabajo),
               "comandos_verify": args.verify or [], "historial": []}
@@ -95,6 +99,10 @@ def cmd_status(args: argparse.Namespace, ap: argparse.ArgumentParser) -> int:
     print("config cargada:")
     for f in cfg.fuentes:
         print(f"  {f}")
+    avisos = comprobar_local(cfg, iniciar=False)
+    print("modelo local: " + ("ok" if not avisos else "con avisos"))
+    for aviso in avisos:
+        print(f"  {aviso}")
     return 0
 
 
