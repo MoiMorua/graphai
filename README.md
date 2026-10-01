@@ -13,7 +13,9 @@ no se toca y al final revisas un commit normal.
 - [uv](https://docs.astral.sh/uv/) y git.
 - [Ollama](https://ollama.com) con `qwen3-coder:30b` (o cualquier servidor OpenAI-compatible
   local, p. ej. llama-server en `:8080`). Fija `OLLAMA_CONTEXT_LENGTH=32768` y reinicia Ollama:
-  su API `/v1` ignora `num_ctx`.
+  su API `/v1` ignora `num_ctx`. Si el servidor no responde, `grafo run` lo avisa y lanza
+  `ollama serve` (desactívalo con `iniciar: false` en el backend `local`); `grafo status`
+  muestra si está activo y si falta descargar el modelo.
 - Opcional: suscripción a [OpenCode Go](https://opencode.ai/go). Sin clave, todo corre en local.
 
 ## Instalación
@@ -218,6 +220,7 @@ uv run grafo --help
 | `grafo/grafo.py` | Nodos y aristas condicionales |
 | `grafo/nodos.py` | Implementación de los nodos y prompts |
 | `grafo/router.py` | Clasificador y selección de modelo por rol/tier |
+| `grafo/local.py` | Detección del modelo local y arranque de `ollama serve` |
 | `grafo/llm.py` | Cliente OpenAI-compatible: reintentos con backoff, guard de contexto, registro de consumo |
 | `grafo/presupuesto.py` | Registro de uso y comprobación de las ventanas de Go |
 | `grafo/config.py` | Carga de configuración por capas |

@@ -11,6 +11,7 @@ backends:
   local:
     base_url: http://localhost:11434/v1      # llama-server: http://localhost:8080/v1
     api_key: ollama
+    iniciar: ollama      # si no responde, `grafo run` lanza `ollama serve` (`iniciar: false` lo desactiva)
     # Ollama ignora num_ctx en la API OpenAI-compatible: fíjalo con la variable
     # OLLAMA_CONTEXT_LENGTH (o un Modelfile). Este valor es el guard del grafo:
     # si la petición estimada no cabe, el router pasa al siguiente modelo.
