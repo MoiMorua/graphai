@@ -91,16 +91,25 @@ mkdir -p ~/.claude/skills && cp -r skills/grafo ~/.claude/skills/
 mkdir -p /ruta/mi-repo/.cursor/skills && cp -r skills/grafo /ruta/mi-repo/.cursor/skills/
 ```
 
-Sin clonar, con el CLI de GitHub:
+Sin clonar (el repo es público):
 
 ```bash
 mkdir -p ~/.claude/skills/grafo
-gh api repos/MoiMorua/graphai/contents/skills/grafo/SKILL.md -H "Accept: application/vnd.github.raw" > ~/.claude/skills/grafo/SKILL.md
+curl -fsSL https://raw.githubusercontent.com/MoiMorua/graphai/main/skills/grafo/SKILL.md -o ~/.claude/skills/grafo/SKILL.md
 ```
 
-Para que la skill se actualice con el repo, usa un enlace en lugar de una copia
-(`New-Item -ItemType Junction -Path $HOME\.claude\skills\grafo -Target C:\ruta\graphai\skills\grafo`
-en Windows, `ln -s /ruta/graphai/skills/grafo ~/.claude/skills/grafo` en bash).
+Para que la skill se actualice con el repo, usa un enlace en lugar de una copia. Si ya
+copiaste la carpeta, bórrala antes: el enlace no se puede crear sobre una carpeta existente.
+
+```powershell
+# Windows (PowerShell). No uses `ln -s` de Git Bash: en Windows hace una copia, no un enlace.
+New-Item -ItemType Junction -Path $HOME\.claude\skills\grafo -Target C:\ruta\graphai\skills\grafo
+```
+
+```bash
+# macOS / Linux
+ln -s /ruta/graphai/skills/grafo ~/.claude/skills/grafo
+```
 
 Reinicia la sesión del harness para que la detecte. Para comprobarlo, pide algo como
 *"delegate this ticket to grafo"*: el agente debería empezar por `grafo status`.
