@@ -119,7 +119,10 @@ Open `<repo>/.grafo/tickets/<id>.json`:
 - `pasos[i].feedback` — the last verify output or reviewer comments per step; usually shows
   the real problem (missing dependency, wrong test command, ambiguous ticket). Lines starting
   with `PISTA:` mean grafo recognized an environment error (import, missing command, timeout),
-  not a logic bug; `AVISO:` means the model repeated the same files and the same error.
+  not a logic bug; `AVISO:` means the model repeated the same files and the same error;
+  `DIAGNÓSTICO:` is a stronger model's root-cause analysis after the same verify error twice
+  in a row (also in `historial`, node `diagnostico`). If the step still failed after it, the
+  diagnosis is usually the best starting point for fixing the ticket or the repo.
 - `pasos[i].tier_actual`, `historial` — which models were tried and what each node decided.
   A step that escalates before using up its attempts was stuck repeating itself (`repeticiones`).
 

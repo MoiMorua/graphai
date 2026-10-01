@@ -3,7 +3,15 @@ from pathlib import Path
 
 from grafo.config import Config
 from grafo.llm import Respuesta
-from grafo.nodos import AVISO_REPETICION, Nodos, huella, normalizar_error, pistas
+from grafo.nodos import (
+    AVISO_REPETICION,
+    Nodos,
+    huella,
+    normalizar_error,
+    pistas,
+    recortar,
+)
+from grafo.router import SinModelos
 
 
 class RouterFalso:
@@ -26,7 +34,8 @@ def config(intentos: int = 3) -> Config:
 def paso(**extra) -> dict:
     return {"id": 0, "descripcion": "crear calc", "archivos": ["calc.py"], "tier_inicial": 1,
             "tier_actual": 1, "intentos_en_tier": 0, "feedback": [], "huella": None,
-            "huella_anterior": None, "repeticiones": 0, "estado": "en_curso", **extra}
+            "huella_anterior": None, "repeticiones": 0, "ultimo_error": None, "diagnosticados": [],
+            "estado": "en_curso", **extra}
 
 
 def ticket(repo: Path, **extra) -> dict:
@@ -126,9 +135,68 @@ def test_fallo_avisa_en_la_primera_repeticion_y_escala_en_la_segunda(tmp_path):
 
 def test_fallo_no_cuenta_repeticion_si_cambia_el_codigo_o_el_error(tmp_path):
     nodos = Nodos(config(), RouterFalso(""))
-    p = paso(huella="h1", huella_anterior="h0", feedback=[ERROR])
+    p = paso(huella="h1", huella_anterior="h0", feedback=[ERROR], ultimo_error=normalizar_error(ERROR))
     assert nodos.fallo(ticket(tmp_path, pasos=[p], fallo=ERROR))["pasos"][0]["repeticiones"] == 0
 
-    p = paso(huella="h", huella_anterior="h", feedback=[ERROR])
+    p = paso(huella="h", huella_anterior="h", feedback=[ERROR], ultimo_error=normalizar_error(ERROR))
     upd = nodos.fallo(ticket(tmp_path, pasos=[p], fallo="AssertionError: 4 != 5"))
     assert upd["pasos"][0]["repeticiones"] == 0
+
+
+# ---------- recortar ----------
+
+def test_recortar_conserva_principio_y_final():
+    salida = "PRIMER ERROR\n" + "x" * 10_000 + "\nRESUMEN FINAL"
+    r = recortar(salida, limite=1000)
+    assert r.startswith("PRIMER ERROR") and r.endswith("RESUMEN FINAL")
+    assert "caracteres omitidos" in r and len(r) < 1100
+    assert recortar("corto", limite=1000) == "corto"
+
+
+# ---------- diagnóstico ----------
+
+def test_fallo_pide_diagnostico_una_vez_por_error_repetido(tmp_path):
+    nodos = Nodos(config(intentos=10), RouterFalso(""))
+    p = paso(huella="a")
+    upd = nodos.fallo(ticket(tmp_path, pasos=[p], fallo=ERROR))
+    assert not upd["diagnosticar"]  # primera vez que aparece el error
+
+    p = upd["pasos"][0]
+    p["huella"] = "b"  # el código cambió, pero el error es el mismo
+    upd = nodos.fallo(ticket(tmp_path, pasos=[p], fallo=ERROR))
+    assert upd["diagnosticar"]
+
+    p = upd["pasos"][0]
+    p["huella"] = "c"
+    assert not nodos.fallo(ticket(tmp_path, pasos=[p], fallo=ERROR))["diagnosticar"]  # ya diagnosticado
+
+
+def test_fallo_no_diagnostica_peticiones_del_revisor(tmp_path):
+    cambios = "El revisor pidió cambios:\nfalta un test"
+    p = paso(feedback=[cambios], ultimo_error=normalizar_error(cambios))
+    upd = Nodos(config(), RouterFalso("")).fallo(ticket(tmp_path, pasos=[p], fallo=cambios))
+    assert not upd["diagnosticar"]
+
+
+def test_diagnostico_antepone_causa_y_accion_al_feedback(tmp_path):
+    router = RouterFalso('{"causa": "tests/ es otro crate", "accion": "usa demo::calc"}')
+    p = paso(feedback=["intento 1", ERROR])
+    upd = Nodos(config(), router).diagnostico(ticket(tmp_path, pasos=[p], fallo=ERROR))
+
+    fb = upd["pasos"][0]["feedback"]
+    assert fb[0] == "intento 1"
+    assert fb[-1].startswith("DIAGNÓSTICO (causa raíz): tests/ es otro crate\nQUÉ HACER: usa demo::calc")
+    assert fb[-1].endswith(ERROR)
+    assert "ERROR (repetido):" in router.mensajes[0][1]["content"]
+    assert upd["diagnosticar"] is False
+
+
+class RouterSinModelos:
+    def llamar(self, *a, **k):
+        raise SinModelos("nada")
+
+
+def test_diagnostico_sin_modelo_no_rompe_el_ticket(tmp_path):
+    p = paso(feedback=[ERROR])
+    upd = Nodos(config(), RouterSinModelos()).diagnostico(ticket(tmp_path, pasos=[p], fallo=ERROR))
+    assert upd["diagnosticar"] is False and "pasos" not in upd and "error" not in upd

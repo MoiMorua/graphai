@@ -21,7 +21,9 @@ log = logging.getLogger("grafo.nodos")
 IGNORAR = {".git", ".grafo", ".venv", "venv", "node_modules", "__pycache__", ".pytest_cache", "logs",
            "dist", "build"}
 MAX_CHARS_ARCHIVO = 12_000
+MAX_CHARS_VERIFY = 4_000       # por comando; se conserva el principio (primer error) y el final (resumen)
 DECISIONES = ("aceptar", "cambios", "replanificar")
+PREFIJO_VERIFY = "Fallaron las verificaciones:"
 
 PROMPT_PLAN = """Eres el planificador de un agente de desarrollo. Descompón el ticket en el
 MÍNIMO de pasos necesario: una tarea pequeña es UN solo paso. Cada paso es una unidad
@@ -89,6 +91,14 @@ Responde SOLO con JSON:
 Usa "cambios" para problemas concretos del código (explica cuáles).
 Usa "replanificar" solo si el plan en sí es incorrecto o incompleto para el ticket."""
 
+PROMPT_DIAGNOSTICO = """Eres un experto en diagnosticar fallos de compilación y de tests en cualquier
+lenguaje. Un generador de código ha fallado dos veces seguidas con el mismo error. No escribas el
+código: identifica la causa raíz y di qué hay que cambiar. Distingue un fallo de la lógica de uno
+de entorno o estructura (imports, rutas, nombres de módulo o paquete, configuración del proyecto,
+archivos de soporte que faltan). Responde SOLO con JSON:
+{"causa": str, "accion": str}
+"accion": instrucciones concretas y breves (qué archivo crear o modificar y cómo), máximo 5 líneas."""
+
 
 class JSONInvalido(ValueError):
     def __init__(self, msg: str, respuestas: list[Respuesta]):
@@ -141,6 +151,15 @@ def huella(repo: Path, rutas: list[str]) -> str:
 
 def normalizar_error(texto: str) -> str:
     return RE_RUIDO.sub("", texto)
+
+
+def recortar(salida: str, limite: int = MAX_CHARS_VERIFY) -> str:
+    """Recorta conservando el principio (suele estar el primer error) y el final (el resumen)."""
+    if len(salida) <= limite:
+        return salida
+    cabeza, cola = limite * 2 // 5, limite * 3 // 5
+    omitidos = len(salida) - cabeza - cola
+    return f"{salida[:cabeza]}\n[… {omitidos} caracteres omitidos …]\n{salida[-cola:]}"
 
 
 class Nodos:
@@ -235,7 +254,7 @@ class Nodos:
                               archivos=[str(a) for a in p.get("archivos") or []],
                               tier_inicial=tier, tier_actual=tier, intentos_en_tier=0,
                               feedback=[], huella=None, huella_anterior=None, repeticiones=0,
-                              estado="pendiente"))
+                              ultimo_error=None, diagnosticados=[], estado="pendiente"))
         for p in pasos:
             log.info("  paso %d [tier %d] %s", p["id"] + 1, p["tier_inicial"], p["descripcion"])
         return {"pasos": pasos, "paso_idx": 0, "archivos_escritos": [], "error": None,
@@ -296,11 +315,11 @@ class Nodos:
                 codigo, salida = -1, "timeout"
             if codigo not in codigos_ok:
                 notas = "".join(f"PISTA: {p}\n" for p in pistas(salida))
-                errores.append(f"$ {cmd}  (exit {codigo})\n{notas}{salida[-3000:]}")
+                errores.append(f"$ {cmd}  (exit {codigo})\n{notas}{recortar(salida)}")
         ok = not errores
         log.info("  verify: %s", "OK" if ok else f"{len(errores)} comando(s) fallaron")
         return {"verify_ok": ok,
-                "fallo": None if ok else "Fallaron las verificaciones:\n" + "\n\n".join(errores),
+                "fallo": None if ok else f"{PREFIJO_VERIFY}\n" + "\n\n".join(errores),
                 "historial": [{"nodo": "verify", "ok": ok}]}
 
     def fallo(self, state: Ticket) -> dict:
@@ -308,13 +327,17 @@ class Nodos:
 
         Si el modelo repite la misma salida con el mismo error, se le avisa una vez;
         a la segunda repetición seguida se escala sin agotar los intentos del tier.
+        Si verify falla dos veces seguidas con el mismo error (aunque cambie el código),
+        se pide un diagnóstico, una sola vez por error distinto.
         """
         pasos = copy.deepcopy(state["pasos"])
         paso = pasos[state["paso_idx"]]
         motivo = state.get("fallo") or "fallo sin detalle"
-        previo = paso["feedback"][-1].removeprefix(AVISO_REPETICION + "\n\n") if paso["feedback"] else None
+        error = normalizar_error(motivo)
+        mismo_error = error == paso.get("ultimo_error")
+        paso["ultimo_error"] = error
         misma_salida = paso.get("huella") is not None and paso["huella"] == paso.get("huella_anterior")
-        repetido = misma_salida and previo is not None and normalizar_error(motivo) == normalizar_error(previo)
+        repetido = misma_salida and mismo_error
         paso["repeticiones"] = paso.get("repeticiones", 0) + 1 if repetido else 0
         if paso["repeticiones"] == 1:
             log.info("  paso %d: misma salida y mismo error que el intento anterior", paso["id"] + 1)
@@ -330,11 +353,47 @@ class Nodos:
             escalado = True
             if paso["tier_actual"] <= self.cfg.max_tier:
                 log.info("  paso %d: escalado a tier %d", paso["id"] + 1, paso["tier_actual"])
-        upd = {"pasos": pasos, "historial": [{"nodo": "fallo", "paso": paso["id"],
-                                              "tier": paso["tier_actual"], "escalado": escalado}]}
+        upd = {"pasos": pasos, "diagnosticar": False,
+               "historial": [{"nodo": "fallo", "paso": paso["id"],
+                              "tier": paso["tier_actual"], "escalado": escalado}]}
         if paso["tier_actual"] > self.cfg.max_tier:
             upd["error"] = f"el paso {paso['id'] + 1} agotó todos los tiers"
+            return upd
+        clave = hashlib.sha1(error.encode()).hexdigest()[:12]
+        diagnosticados = paso.setdefault("diagnosticados", [])
+        if motivo.startswith(PREFIJO_VERIFY) and mismo_error and clave not in diagnosticados:
+            diagnosticados.append(clave)
+            upd["diagnosticar"] = True
         return upd
+
+    def diagnostico(self, state: Ticket) -> dict:
+        """Pide a un modelo la causa raíz de un error de verify repetido y la antepone al feedback.
+
+        Es una ayuda: si no hay modelo o la respuesta no es válida, el ticket sigue igual.
+        """
+        repo = Path(state["repo"])
+        pasos = copy.deepcopy(state["pasos"])
+        paso = pasos[state["paso_idx"]]
+        usuario = (f"TICKET:\n{state['descripcion']}\n\nPASO ACTUAL: {paso['descripcion']}\n\n"
+                   f"ARCHIVOS DEL REPO:\n{arbol_repo(repo)}\n\n"
+                   f"ARCHIVOS ACTUALES:\n{mostrar_archivos(repo, paso['archivos'] + state.get('archivos_escritos', []))}\n\n"
+                   f"ERROR (repetido):\n{state.get('fallo')}")
+        try:
+            d, rs = self._llm_json(state, "diagnostico", paso["tier_actual"], PROMPT_DIAGNOSTICO, usuario,
+                                   4000, "diagnostico",   # los modelos con razonamiento lo consumen antes de responder
+                                   lambda d: bool(d.get("causa")) and bool(d.get("accion")))
+        except JSONInvalido as e:
+            log.warning("  diagnóstico sin respuesta válida; se continúa sin él")
+            return {"diagnosticar": False, **self._cuenta(state, e.respuestas, "diagnostico", ok=False)}
+        except (LLMError, SinModelos) as e:
+            log.warning("  diagnóstico no disponible (%s); se continúa sin él", e)
+            return {"diagnosticar": False, "historial": [{"nodo": "diagnostico", "error": str(e)}]}
+
+        causa, accion = str(d["causa"]).strip(), str(d["accion"]).strip()
+        log.info("  diagnóstico paso %d: %s", paso["id"] + 1, causa[:120])
+        paso["feedback"][-1] = f"DIAGNÓSTICO (causa raíz): {causa}\nQUÉ HACER: {accion}\n\n{paso['feedback'][-1]}"
+        return {"pasos": pasos, "diagnosticar": False,
+                **self._cuenta(state, rs, "diagnostico", causa=causa, accion=accion)}
 
     def review(self, state: Ticket) -> dict:
         repo = Path(state["repo"])
@@ -344,7 +403,8 @@ class Nodos:
                    f"ARCHIVOS RESULTANTES:\n{mostrar_archivos(repo, state.get('archivos_escritos', []))}")
         try:
             d, rs = self._llm_json(state, "review", paso["tier_actual"], PROMPT_REVIEW, usuario,
-                                   2000, "review", lambda d: d.get("decision") in DECISIONES)
+                                   4000, "review",   # margen para el razonamiento de glm-flash
+                                   lambda d: d.get("decision") in DECISIONES)
         except JSONInvalido as e:
             return {"error": str(e), **self._cuenta(state, e.respuestas, "review")}
         except (LLMError, SinModelos) as e:

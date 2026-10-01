@@ -17,7 +17,7 @@ def construir(cfg: Config | None = None):
     n = Nodos(cfg, router)
 
     g = StateGraph(Ticket)
-    for nombre in ("ingesta", "plan", "codegen", "verify", "fallo", "review",
+    for nombre in ("ingesta", "plan", "codegen", "verify", "fallo", "diagnostico", "review",
                    "avanzar", "replanificar", "humano", "fin"):
         g.add_node(nombre, getattr(n, nombre))
 
@@ -35,7 +35,12 @@ def construir(cfg: Config | None = None):
         return "review" if s["verify_ok"] else "fallo"
 
     def tras_fallo(s: Ticket) -> str:
-        return "humano" if s.get("error") or n.excede_limites(s) else "codegen"
+        if s.get("error") or n.excede_limites(s):
+            return "humano"
+        return "diagnostico" if s.get("diagnosticar") else "codegen"
+
+    def tras_diagnostico(s: Ticket) -> str:
+        return "humano" if n.excede_limites(s) else "codegen"
 
     def tras_review(s: Ticket) -> str:
         if s.get("error"):
@@ -54,7 +59,8 @@ def construir(cfg: Config | None = None):
     g.add_conditional_edges("plan", tras_plan, ["codegen", "humano"])
     g.add_conditional_edges("codegen", tras_codegen, ["verify", "fallo", "humano"])
     g.add_conditional_edges("verify", tras_verify, ["review", "fallo", "humano"])
-    g.add_conditional_edges("fallo", tras_fallo, ["codegen", "humano"])
+    g.add_conditional_edges("fallo", tras_fallo, ["codegen", "diagnostico", "humano"])
+    g.add_conditional_edges("diagnostico", tras_diagnostico, ["codegen", "humano"])
     g.add_conditional_edges("review", tras_review, ["avanzar", "fallo", "replanificar", "humano"])
     g.add_conditional_edges("avanzar", tras_avanzar, ["codegen", "fin"])
     g.add_conditional_edges("replanificar", tras_replanificar, ["plan", "humano"])
