@@ -55,26 +55,42 @@ def aplicar_salida(repo: Path, texto: str) -> list[str]:
         return []
 
     # --- Validación completa (sin tocar el disco) ---
+    # Simula el efecto de cada operación para detectar conflictos entre ellas
+    # (p. ej. borrar el origen de un MOVER o mover dos veces al mismo destino).
+    creados: set[Path] = set()
+    quitados: set[Path] = set()
+
+    def existe(p: Path) -> bool:
+        return p in creados or (p not in quitados and p.is_file())
+
     val_moves = []
     for viejo, nuevo in moves:
         p_viejo = ruta_segura(repo, viejo)
         p_nuevo = ruta_segura(repo, nuevo)
-        if not p_viejo.exists():
+        if not existe(p_viejo):
             raise ValueError(f"no existe: {viejo}")
-        if p_nuevo.exists():
+        if existe(p_nuevo) or p_nuevo.is_dir():
             raise ValueError(f"ya existe: {nuevo}")
+        creados.discard(p_viejo)
+        quitados.add(p_viejo)
+        quitados.discard(p_nuevo)
+        creados.add(p_nuevo)
         val_moves.append((viejo, nuevo, p_viejo, p_nuevo))
 
     val_deletes = []
     for rel in deletes:
         p = ruta_segura(repo, rel)
-        if not p.exists():
+        if not existe(p):
             raise ValueError(f"no existe: {rel}")
+        creados.discard(p)
+        quitados.add(p)
         val_deletes.append((rel, p))
 
     val_writes = []
     for rel, contenido in writes:
         p = ruta_segura(repo, rel)
+        if p.is_dir():
+            raise ValueError(f"es un directorio: {rel}")
         val_writes.append((rel, p, contenido))
 
     # --- Aplicación en orden: MOVER -> BORRAR -> ARCHIVO ---

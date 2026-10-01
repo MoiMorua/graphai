@@ -87,6 +87,46 @@ def test_mover_sobre_existente_lanza(tmp_path):
     assert (tmp_path / "b.txt").read_text(encoding="utf-8") == "b\n"
 
 
+def test_borrar_origen_de_un_mover_lanza_sin_tocar_disco(tmp_path):
+    (tmp_path / "a.txt").write_text("a\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="no existe: a.txt"):
+        aplicar_salida(tmp_path, "### MOVER: a.txt -> b.txt\n### BORRAR: a.txt\n")
+
+    assert (tmp_path / "a.txt").exists()
+    assert not (tmp_path / "b.txt").exists()
+
+
+def test_dos_mover_al_mismo_destino_lanza(tmp_path):
+    (tmp_path / "a.txt").write_text("a\n", encoding="utf-8")
+    (tmp_path / "c.txt").write_text("c\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="ya existe: b.txt"):
+        aplicar_salida(tmp_path, "### MOVER: a.txt -> b.txt\n### MOVER: c.txt -> b.txt\n")
+
+    assert (tmp_path / "a.txt").exists()
+    assert not (tmp_path / "b.txt").exists()
+
+
+def test_mover_encadenado_y_borrar_el_destino(tmp_path):
+    (tmp_path / "a.txt").write_text("a\n", encoding="utf-8")
+
+    tocadas = aplicar_salida(tmp_path, "### MOVER: a.txt -> b.txt\n### BORRAR: b.txt\n")
+
+    assert not (tmp_path / "a.txt").exists()
+    assert not (tmp_path / "b.txt").exists()
+    assert tocadas == ["a.txt", "b.txt"]
+
+
+def test_borrar_directorio_lanza(tmp_path):
+    (tmp_path / "d").mkdir()
+
+    with pytest.raises(ValueError, match="no existe: d"):
+        aplicar_salida(tmp_path, "### BORRAR: d\n")
+
+    assert (tmp_path / "d").is_dir()
+
+
 def test_lista_devuelta_incluye_viejo_y_nuevo(tmp_path):
     (tmp_path / "a.txt").write_text("x\n", encoding="utf-8")
 

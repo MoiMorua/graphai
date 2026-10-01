@@ -4,7 +4,6 @@ import copy
 import json
 import logging
 import os
-import re
 import subprocess
 from collections.abc import Callable
 from pathlib import Path
@@ -13,13 +12,13 @@ from .config import Config
 from .estado import Paso, Ticket
 from .llm import LLMError, Respuesta, extraer_json
 from .router import Router, SinModelos
+from .salida import aplicar_salida, ruta_segura
 
 log = logging.getLogger("grafo.nodos")
 
 IGNORAR = {".git", ".grafo", ".venv", "venv", "node_modules", "__pycache__", ".pytest_cache", "logs",
            "dist", "build"}
 MAX_CHARS_ARCHIVO = 12_000
-RE_ARCHIVO = re.compile(r"^###\s*(?:ARCHIVO:\s*)?`?([^\s`]+)`?\s*\n```[^\n]*\n(.*?)\n```", re.M | re.S)
 DECISIONES = ("aceptar", "cambios", "replanificar")
 
 PROMPT_PLAN = """Eres el planificador de un agente de desarrollo. Descompón el ticket en el
@@ -36,7 +35,13 @@ Devuelve cada archivo nuevo o modificado COMPLETO, con este formato exacto y sin
 ### ARCHIVO: ruta/relativa
 ```
 <contenido completo del archivo>
-```"""
+```
+Para renombrar o mover un archivo usa una línea (sin bloque de código), y añade además su
+bloque ARCHIVO con la ruta nueva solo si también cambia su contenido:
+### MOVER: ruta/vieja -> ruta/nueva
+Para eliminar un archivo usa una línea:
+### BORRAR: ruta/relativa
+Actualiza también los archivos que referencian a los renombrados (imports, configuración)."""
 
 PROMPT_REVIEW = """Eres revisor de código. Las verificaciones automáticas ya pasaron.
 Evalúa SOLO el PASO ACTUAL: lo que corresponde a pasos pendientes del plan se hará después
@@ -62,13 +67,6 @@ def arbol_repo(repo: Path, limite: int = 300) -> str:
             if len(rutas) >= limite:
                 return "\n".join(rutas) + "\n…"
     return "\n".join(rutas) or "(repo vacío)"
-
-
-def ruta_segura(repo: Path, rel: str) -> Path:
-    destino = (repo / rel).resolve()
-    if not destino.is_relative_to(repo.resolve()):
-        raise ValueError(f"ruta fuera del repo: {rel}")
-    return destino
 
 
 def leer(repo: Path, rel: str) -> str | None:
@@ -208,21 +206,15 @@ class Nodos:
             return {**base, "fallo": f"El modelo no produjo respuesta: {e}",
                     "historial": [{"nodo": "codegen", "error": str(e)}]}
 
-        bloques = RE_ARCHIVO.findall(r.texto)
-        if not bloques:
+        try:
+            escritos = aplicar_salida(repo, r.texto)
+        except ValueError as e:
+            return {**base, "fallo": str(e), **self._cuenta(state, [r], "codegen")}
+        if not escritos:
             log.warning("  codegen sin bloques válidos; inicio de la salida:\n%s", r.texto[:400])
             return {**base, "fallo": "No se encontró ningún bloque '### ARCHIVO: ruta' seguido de "
                                      "un bloque de código. Respeta el formato exacto.",
                     **self._cuenta(state, [r], "codegen", archivos=0)}
-        escritos: list[str] = []
-        for rel, contenido in bloques:
-            try:
-                destino = ruta_segura(repo, rel)
-            except ValueError as e:
-                return {**base, "fallo": str(e), **self._cuenta(state, [r], "codegen")}
-            destino.parent.mkdir(parents=True, exist_ok=True)
-            destino.write_text(contenido + "\n", encoding="utf-8")
-            escritos.append(rel)
         log.info("  paso %d: escritos %s", paso["id"] + 1, escritos)
         return {**base, "fallo": None, "archivos_modificados": escritos,
                 "archivos_escritos": list(dict.fromkeys(state.get("archivos_escritos", []) + escritos)),
