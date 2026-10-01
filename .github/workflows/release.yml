@@ -1,0 +1,33 @@
+name: Release
+
+# Se dispara al subir un tag vX.Y.Z. El tag debe coincidir con la versión de pyproject.toml.
+on:
+  push:
+    tags: ["v*.*.*"]
+
+permissions:
+  contents: write   # crear el GitHub Release
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+
+      - name: Comprobar que el tag coincide con pyproject.toml
+        run: |
+          version="$(uv version --short)"
+          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::El tag $GITHUB_REF_NAME no coincide con la versión $version de pyproject.toml"
+            exit 1
+          fi
+
+      - run: uv sync --locked
+      - run: uv run pytest -q
+      - run: uv build
+
+      - name: Crear el GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" dist/* --title "$GITHUB_REF_NAME" --generate-notes --verify-tag

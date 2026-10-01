@@ -19,7 +19,9 @@ grafo status
 Expect: a home directory, `clave OpenCode Go: ****xxxx` (or "no guardada"), and the config
 layers that apply in the current directory.
 
-- `grafo: command not found` → install it: `uv tool install git+ssh://git@github.com/MoiMorua/graphai.git`.
+- `grafo: command not found` → install the latest release: check the tag at
+  https://github.com/MoiMorua/graphai/releases and run
+  `uv tool install git+https://github.com/MoiMorua/graphai.git@vX.Y.Z`.
 - No key → planning/review fall back to the local model; quality drops but it still runs.
   The key is set with `grafo login`, which prompts without echo. **Ask the user to run it
   themselves**; never ask for the key in chat or pass it with `--key` in a shared log.
@@ -135,6 +137,8 @@ Common causes and fixes:
 | `grafo login [--key K]` | Save the OpenCode Go key (user should run it interactively) |
 | `grafo logout` | Delete the saved key |
 | `grafo status` | Show home, masked key, active config layers |
+| `grafo --version` | Installed version and where it came from |
+| `grafo upgrade [--check]` | Install the latest release (on Windows it finishes in the background; check `grafo --version` a few seconds later) |
 | `grafo mermaid` | Print the graph as a Mermaid diagram |
 
 Files: `~/.config/grafo/` (`.env` key, `logs/uso.jsonl` per-call usage, `worktrees/`);

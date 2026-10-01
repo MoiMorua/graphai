@@ -18,14 +18,31 @@ no se toca y al final revisas un commit normal.
 
 ## Instalación
 
-```powershell
-uv tool install git+ssh://git@github.com/MoiMorua/graphai.git
-# o, desde un clon y en modo editable (los cambios al código aplican sin reinstalar):
-uv tool install -e C:\ruta\graphai
+Instala un release (los tags están en [Releases](https://github.com/MoiMorua/graphai/releases)):
 
-grafo login     # pide la clave de OpenCode Go sin eco y la guarda en ~/.config/grafo/.env
-grafo status    # comprueba clave y configuración
+```powershell
+uv tool install git+https://github.com/MoiMorua/graphai.git@v0.1.0
+
+grafo login       # pide la clave de OpenCode Go sin eco y la guarda en ~/.config/grafo/.env
+grafo status      # comprueba clave y configuración
+grafo --version   # versión y origen de la instalación
 ```
+
+Para desarrollar el propio grafo, instálalo en modo editable desde un clon (los cambios al
+código aplican sin reinstalar): `uv tool install -e C:\ruta\graphai`.
+
+### Actualizar
+
+```powershell
+grafo upgrade --check   # ¿hay un release más nuevo?
+grafo upgrade           # instala el último release
+grafo upgrade v0.1.0    # instala uno concreto (también sirve para volver atrás)
+```
+
+En Windows la instalación se hace en segundo plano en cuanto termina el comando (uv no puede
+reemplazar `grafo.exe` mientras se ejecuta); el resultado queda en
+`~/.config/grafo/logs/upgrade.log`. Con una instalación editable, `upgrade` no toca nada y te
+indica cómo actualizar el clon; `grafo upgrade --forzar` la reemplaza por la del release.
 
 ## Uso
 
@@ -51,7 +68,9 @@ Al terminar imprime el resultado y los comandos para continuar:
 | `grafo login [--key K]` | Guarda la clave de Go |
 | `grafo logout` | Borra la clave guardada |
 | `grafo status` | Muestra el home, la clave (enmascarada) y las capas de config que aplican aquí |
+| `grafo upgrade [VERSION]` | Actualiza al último release o a `VERSION` (`--check`, `--forzar`) |
 | `grafo mermaid` | Imprime el diagrama del grafo |
+| `grafo --version` | Versión instalada y su origen |
 
 - El worktree parte de `HEAD`: los cambios sin commitear no los ve. Solo se commitean los
   archivos que escribió el agente, también si el ticket termina escalado a humano.
@@ -204,8 +223,26 @@ uv run grafo --help
 | `grafo/config.py` | Carga de configuración por capas |
 | `grafo/git.py` | Rama + worktree por ticket y commit |
 | `grafo/credenciales.py` | Guardar, leer y borrar la clave de Go |
+| `grafo/actualizar.py` | Versión instalada, consulta de releases y `upgrade` |
 
 El CLI con subcomandos lo implementó el propio agente (`grafo run` sobre este repo).
+
+### Publicar un release
+
+La versión vive en `pyproject.toml` y el tag debe coincidir (`v` + versión). Con el bump
+integrado en `main` (por PR o directamente):
+
+```powershell
+uv version --bump minor          # 0.1.0 -> 0.2.0 (o patch / major); actualiza pyproject.toml y uv.lock
+git commit -am "Release v0.2.0"  # y abre el PR, o súbelo a main
+# ya en main, con el commit integrado:
+git tag v0.2.0
+git push origin v0.2.0
+```
+
+El tag dispara `.github/workflows/release.yml`: comprueba que coincide con `pyproject.toml`,
+corre los tests, construye wheel y sdist y crea el GitHub Release con notas generadas a partir
+de los PRs. `.github/workflows/ci.yml` corre los tests en cada PR y en cada push a `main`.
 
 ## Pendientes
 
