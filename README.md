@@ -62,8 +62,50 @@ Al terminar imprime el resultado y los comandos para continuar:
 
 `skills/grafo/SKILL.md` (en inglés, formato Agent Skills) enseña a un agente a usar el CLI:
 comprobar requisitos, redactar el ticket, ejecutarlo, revisar la rama y diagnosticar escalados.
-Copia la carpeta `skills/grafo/` al directorio de skills de tu harness, por ejemplo
-`~/.claude/skills/` (Claude Code) o `.cursor/skills/` (Cursor).
+
+Instalar la skill es copiar la carpeta `skills/grafo/` (con su `SKILL.md`) al directorio de
+skills de tu harness:
+
+| Harness | Para todos tus proyectos | Solo para un repo |
+|---|---|---|
+| Claude Code | `~/.claude/skills/grafo/` | `<repo>/.claude/skills/grafo/` |
+| Cursor | — | `<repo>/.cursor/skills/grafo/` |
+| Otro | El directorio de skills que indique su documentación | |
+
+Desde un clon de este repo, en PowerShell:
+
+```powershell
+# Claude Code, global
+New-Item -ItemType Directory -Force $HOME\.claude\skills | Out-Null
+Copy-Item -Recurse -Force .\skills\grafo $HOME\.claude\skills\
+
+# Cursor (o Claude Code por proyecto), dentro del repo donde vas a usar grafo
+New-Item -ItemType Directory -Force C:\ruta\mi-repo\.cursor\skills | Out-Null
+Copy-Item -Recurse -Force .\skills\grafo C:\ruta\mi-repo\.cursor\skills\
+```
+
+En bash (macOS / Linux / Git Bash):
+
+```bash
+mkdir -p ~/.claude/skills && cp -r skills/grafo ~/.claude/skills/
+mkdir -p /ruta/mi-repo/.cursor/skills && cp -r skills/grafo /ruta/mi-repo/.cursor/skills/
+```
+
+Sin clonar, con el CLI de GitHub:
+
+```bash
+mkdir -p ~/.claude/skills/grafo
+gh api repos/MoiMorua/graphai/contents/skills/grafo/SKILL.md -H "Accept: application/vnd.github.raw" > ~/.claude/skills/grafo/SKILL.md
+```
+
+Para que la skill se actualice con el repo, usa un enlace en lugar de una copia
+(`New-Item -ItemType Junction -Path $HOME\.claude\skills\grafo -Target C:\ruta\graphai\skills\grafo`
+en Windows, `ln -s /ruta/graphai/skills/grafo ~/.claude/skills/grafo` en bash).
+
+Reinicia la sesión del harness para que la detecte. Para comprobarlo, pide algo como
+*"delegate this ticket to grafo"*: el agente debería empezar por `grafo status`.
+Las rutas de Cursor y otros harnesses pueden cambiar entre versiones; si no la detecta,
+revisa en su documentación dónde busca las skills.
 
 ## Cómo funciona
 
