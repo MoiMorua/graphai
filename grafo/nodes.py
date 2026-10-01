@@ -11,10 +11,10 @@ from collections.abc import Callable
 from pathlib import Path
 
 from .config import Config
-from .estado import Paso, Ticket
 from .llm import LLMError, Respuesta, extraer_json
+from .output import aplicar_salida, ruta_segura
 from .router import Router, SinModelos
-from .salida import aplicar_salida, ruta_segura
+from .state import Paso, Ticket
 
 log = logging.getLogger("grafo.nodos")
 

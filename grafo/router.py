@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import logging
 
+from .budget import Libro
 from .config import Config
 from .llm import Clientes, LLMError, ModeloNoDisponible, Respuesta, extraer_json
-from .presupuesto import Libro
 
 log = logging.getLogger("grafo.router")
 

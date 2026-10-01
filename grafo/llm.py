@@ -10,8 +10,8 @@ from datetime import datetime
 import openai
 from openai import OpenAI
 
+from .budget import Libro
 from .config import Config
-from .presupuesto import Libro
 
 log = logging.getLogger("grafo.llm")
 

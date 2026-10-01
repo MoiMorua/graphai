@@ -1,7 +1,7 @@
 import pytest
 
-from grafo import credenciales
-from grafo.credenciales import VARIABLE, borrar_clave, guardar_clave, leer_clave
+from grafo import credentials as credenciales
+from grafo.credentials import VARIABLE, borrar_clave, guardar_clave, leer_clave
 
 
 def test_variable_es_opencode_go_api_key():

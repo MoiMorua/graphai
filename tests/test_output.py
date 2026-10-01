@@ -1,6 +1,6 @@
 import pytest
 
-from grafo.salida import aplicar_salida
+from grafo.output import aplicar_salida
 
 
 def test_mover_renombra_y_conserva_contenido(tmp_path):
